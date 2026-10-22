@@ -13,6 +13,7 @@ from sqlalchemy import Connection, Engine, text
 
 from app.core import health as health_mod
 from app.core.model import EquipmentFacts, Health, Recommendation
+from app.core.predict import predict
 from app.core.recommend import recommend
 from app.core.weibull import fit, intervals
 from app.repository import failure_days_by_type_mode, load_facts, plant_settings
@@ -61,10 +62,10 @@ def _run(conn: Connection, run_id: int, plant_id: int, kind: str, equipment_ids:
     recs_open = 0
     for f in facts:
         h = health_mod.score(f, settings, today, baselines.get(f.type_id))
-        snapshot_id = _save_snapshot(conn, run_id, f, h, today)
+        type_weibull = {mode: v for (t, mode), v in weibull.items() if t == f.type_id}
+        snapshot_id = _save_snapshot(conn, run_id, f, h, today, predict(f, today, type_weibull))
         rows += 1
         bands[h.band] = bands.get(h.band, 0) + 1
-        type_weibull = {mode: v for (t, mode), v in weibull.items() if t == f.type_id}
         recs = recommend(f, h, settings, today, type_weibull)
         rows += _save_recommendations(conn, run_id, snapshot_id, f, recs, today)
         recs_open += len(recs)
@@ -73,16 +74,19 @@ def _run(conn: Connection, run_id: int, plant_id: int, kind: str, equipment_ids:
             "weibull_fits": sum(1 for v in weibull.values() if v[0] is not None), "rows_written": rows, "as_of": today.isoformat()}
 
 
-def _save_snapshot(conn: Connection, run_id: int, f: EquipmentFacts, h: Health, today: date) -> int:
+def _save_snapshot(conn: Connection, run_id: int, f: EquipmentFacts, h: Health, today: date, prediction: dict | None) -> int:
     return conn.execute(text(
-        """insert into health_snapshots (plant_id, equipment_id, analytics_run_id, as_of_date, score, band, risk, factors, created_at, updated_at)
-           values (:p, :e, :r, :d, :s, :b, :risk, cast(:f as jsonb), now(), now())
+        """insert into health_snapshots (plant_id, equipment_id, analytics_run_id, as_of_date, score, band, risk, factors,
+                                            failure_probability_30d, prediction, created_at, updated_at)
+           values (:p, :e, :r, :d, :s, :b, :risk, cast(:f as jsonb), :prob, cast(:pred as jsonb), now(), now())
            on conflict (equipment_id, as_of_date) do update
               set analytics_run_id = excluded.analytics_run_id, score = excluded.score, band = excluded.band,
-                  risk = excluded.risk, factors = excluded.factors, updated_at = now()
+                  risk = excluded.risk, factors = excluded.factors, failure_probability_30d = excluded.failure_probability_30d,
+                  prediction = excluded.prediction, updated_at = now()
            returning id"""),
         {"p": f.plant_id, "e": f.id, "r": run_id, "d": today, "s": h.score, "b": h.band, "risk": h.risk,
-         "f": json.dumps([x.as_dict() for x in h.factors])}).scalar_one()
+         "f": json.dumps([x.as_dict() for x in h.factors]),
+         "prob": prediction["probability"] if prediction else None, "pred": json.dumps(prediction) if prediction else None}).scalar_one()
 
 
 def _save_recommendations(conn: Connection, run_id: int, snapshot_id: int, f: EquipmentFacts, recs: list[Recommendation], today: date) -> int:

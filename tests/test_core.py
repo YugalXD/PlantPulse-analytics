@@ -130,3 +130,23 @@ def test_weibull_needs_five_failures_and_recovers_shape():
 
 def test_intervals_are_per_equipment():
     assert intervals([[0, 10, 30], [5, 6]]) == [10, 20, 1]
+
+
+def test_failure_probability_grows_with_age_for_wear_out():
+    from app.core.weibull import probability_of_failure
+
+    young, old = probability_of_failure(3.0, 100, 10), probability_of_failure(3.0, 100, 90)
+    assert 0 < young < old < 1
+    # beta = 1 (random): no memory, same chance at any age
+    assert probability_of_failure(1.0, 100, 10) == pytest.approx(probability_of_failure(1.0, 100, 200), rel=1e-9)
+
+
+def test_prediction_uses_the_worst_mode_seen_on_the_equipment():
+    from app.core.predict import predict
+
+    f = healthy()
+    f.breakdowns = [bd(1, 80, 2, part="BRG", damage="WEAR"), bd(2, 5, 1, part="BELT", damage="BRKN")]
+    p = predict(f, TODAY, {"BRG/WEAR": (3.0, 100.0), "BELT/BRKN": (1.2, 400.0), "GBX/WEAR": (2.0, 50.0)})
+    assert p is not None and p["mode"] == "BRG/WEAR" and p["days_since_failure"] == 80
+    assert "chance of another in the next 30 days" in str(p["explanation"])
+    assert predict(healthy(), TODAY, {"BRG/WEAR": (3.0, 100.0)}) is None

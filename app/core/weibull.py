@@ -59,3 +59,11 @@ def intervals(failure_days: list[list[float]]) -> list[float]:
         s = sorted(days)
         out.extend(b - a for a, b in pairwise(s) if b - a > 0)
     return out
+
+
+def probability_of_failure(beta: float, eta: float, age_days: float, horizon_days: float = 30.0) -> float:
+    """P(fail within horizon | survived age) = 1 - R(age + h) / R(age), R(t) = exp(-(t/eta)^beta)."""
+    if beta <= 0 or eta <= 0:
+        return 0.0
+    age = max(0.0, age_days)
+    return 1.0 - math.exp((age / eta) ** beta - ((age + horizon_days) / eta) ** beta)
