@@ -5,10 +5,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.auth import require_token
+from app.config import settings
 from app.core.weibull import fit, intervals
 from app.db import engine
 from app.repository import failure_days_by_type_mode
 from app.runner import execute
+
+if settings.sentry_dsn:
+    import sentry_sdk
+
+    sentry_sdk.init(dsn=settings.sentry_dsn, send_default_pii=False, traces_sample_rate=0.0)
 
 app = FastAPI(title="CHP Analytics Sidecar", version="1.0.0")
 
