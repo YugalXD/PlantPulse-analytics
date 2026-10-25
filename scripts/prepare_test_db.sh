@@ -3,7 +3,8 @@
 # Usage: scripts/prepare_test_db.sh [db_name]   (default chp_analytics_test)
 set -euo pipefail
 DB="${1:-chp_analytics_test}"
-cd "$(dirname "$0")/../../web"
+# The Laravel app (PlantPulse-web) owns the schema: its checkout in ../web next to this repo, or WEB_DIR.
+cd "${WEB_DIR:-$(dirname "$0")/../../web}"
 php -r '
 $pdo = new PDO("pgsql:host=".(getenv("DB_HOST") ?: "127.0.0.1").";dbname=postgres", getenv("DB_USERNAME") ?: "devuser", getenv("DB_PASSWORD") ?: "devpass");
 $db = $argv[1];

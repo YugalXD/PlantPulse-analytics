@@ -111,6 +111,16 @@ def test_no_rca_advice_once_an_rca_exists():
     assert "RAISE_RCA" not in {r.kind for r in recs}
 
 
+def test_permit_failures_count_but_never_ask_for_an_rca():
+    f = healthy()
+    f.breakdowns = [Breakdown(-7, at(10), at(9.5), 12.0, True, "BELT", None, None, source="PERMIT")]
+    recs = recommend(f, score(f, SETTINGS, TODAY, 8.0), SETTINGS, TODAY)
+    assert "RAISE_RCA" not in {r.kind for r in recs}
+    assert f.breakdowns[0].mode == "BELT/*"
+    assert Breakdown(-8, at(5), None, None, False, None, None, None, source="PERMIT").mode == "*/*"
+    assert bd(1, 5, 1, part="BRG", damage=None).mode is None  # app breakdowns still need part and damage
+
+
 def test_decrease_pm_only_for_long_clean_history_on_non_critical_equipment():
     f = healthy("C")
     f.first_seen = TODAY - timedelta(days=400)

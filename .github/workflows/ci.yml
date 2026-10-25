@@ -1,0 +1,54 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: devuser
+          POSTGRES_PASSWORD: devpass
+          POSTGRES_DB: chp_planner
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      # Read access to ydesignshq/PlantPulse-web (the schema owner) for the integration test.
+      # Without this secret the integration test is skipped; lint and unit tests still run.
+      WEB_REPO_TOKEN: ${{ secrets.WEB_REPO_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: pytest tests/test_core.py tests/test_health.py tests/test_auth.py
+
+      - if: env.WEB_REPO_TOKEN != ''
+        uses: actions/checkout@v4
+        with:
+          repository: ydesignshq/PlantPulse-web
+          token: ${{ secrets.WEB_REPO_TOKEN }}
+          path: web
+      - if: env.WEB_REPO_TOKEN != ''
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          extensions: pdo_pgsql, intl, zip
+          coverage: none
+      - if: env.WEB_REPO_TOKEN != ''
+        run: composer install --prefer-dist --no-interaction --no-progress && cp .env.example .env && php artisan key:generate
+        working-directory: web
+      - if: env.WEB_REPO_TOKEN != ''
+        run: scripts/prepare_test_db.sh chp_analytics_test
+        env: { WEB_DIR: web, DB_HOST: 127.0.0.1, DB_USERNAME: devuser, DB_PASSWORD: devpass }
+      - if: env.WEB_REPO_TOKEN != ''
+        run: pytest tests/test_integration.py
+        env:
+          ANALYTICS_TEST_DATABASE_URL: postgresql+psycopg://devuser:devpass@127.0.0.1:5432/chp_analytics_test

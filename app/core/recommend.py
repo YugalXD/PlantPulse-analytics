@@ -72,7 +72,7 @@ def recommend(facts: EquipmentFacts, health: Health, settings: PlantSettings, to
         out.append(Recommendation("ADD_TO_SHUTDOWN", "Add to the next AOH / COH job list", why.strip(), 55 + bonus,
                                   {"score": health.score, "defects": len(big_old)}))
 
-    rca_due = [b for b in bd90 if not b.has_rca and ((b.downtime_h or 0) > settings.rca_threshold_h or b.is_repeat)]
+    rca_due = [b for b in bd90 if b.source == "APP" and not b.has_rca and ((b.downtime_h or 0) > settings.rca_threshold_h or b.is_repeat)]
     if rca_due:
         worst = max(rca_due, key=lambda b: (b.downtime_h or 0))
         reason = "repeat failure" if worst.is_repeat else f"{worst.downtime_h:.1f} h downtime (threshold {settings.rca_threshold_h:g} h)"

@@ -33,9 +33,12 @@ class Breakdown:
     damage: str | None
     days_since_pm: float | None
     has_rca: bool = False
+    source: str = "APP"  # APP = breakdown log; PERMIT = corrective Eclipse permit before the cut-over (no damage code)
 
     @property
     def mode(self) -> str | None:
+        if self.source == "PERMIT":
+            return f"{self.object_part or '*'}/*"
         if not self.object_part or not self.damage:
             return None
         return f"{self.object_part}/{self.damage}"
@@ -101,6 +104,7 @@ class PlantSettings:
     weights: dict[str, int]
     rca_threshold_h: float = 4.0
     repeat_window_days: int = 30
+    failure_history_until: date | None = None  # permits are the failures before this date, the breakdown log from it
 
 
 @dataclass(frozen=True)

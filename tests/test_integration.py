@@ -4,6 +4,7 @@ Skipped unless ANALYTICS_TEST_DATABASE_URL is set.
 """
 
 import os
+from datetime import timedelta
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -81,3 +82,48 @@ def test_failed_run_is_recorded(engine, monkeypatch):
     with engine.connect() as conn:
         row = conn.execute(text("select status, error from analytics_runs where id = :r"), {"r": run_id}).one()
     assert row.status == "FAILED" and "disk full" in row.error
+
+
+def test_permits_are_the_failure_history_before_the_cut_over(engine):
+    from datetime import date
+
+    from app.repository import failure_days_by_type_mode, load_facts, plant_settings
+
+    with engine.begin() as conn:
+        plant_id = conn.execute(text("select id from plants where code = 'JPL-CHP'")).scalar_one()
+        eq = conn.execute(text("select id, equipment_type_id from equipment where plant_id = :p and tag_no = 'BC-1A'"), {"p": plant_id}).one()
+        conn.execute(text("delete from eclipse_permits where permit_no like 'T-%'"))
+        conn.execute(text(
+            """insert into eclipse_permits (plant_id, permit_no, equipment_id, work_category, object_part_code, status, issued_at, closed_at, created_at, updated_at)
+               values (:p, 'T-1', :e, 'CM', 'BELT', 'Closed', now() - interval '40 days', now() - interval '40 days' + interval '6 hours', now(), now()),
+                      (:p, 'T-2', :e, 'CM', 'BELT', 'Closed', now() - interval '20 days', now() - interval '20 days' + interval '3 hours', now(), now()),
+                      (:p, 'T-3', :e, 'PM', null, 'Closed', now() - interval '30 days', now() - interval '30 days' + interval '8 hours', now(), now()),
+                      (:p, 'T-4', :e, 'CM', 'IDL', 'NOT ISSUED', now() - interval '15 days', null, now(), now()),
+                      (:p, 'T-5', :e, 'CM', 'IDL', 'Closed', now() - interval '2 days', now() - interval '1 day', now(), now())"""),
+            {"p": plant_id, "e": eq.id})
+        conn.execute(text("delete from settings where plant_id = :p and key = 'failure_history_until'"), {"p": plant_id})
+
+        today = date.today()
+        app_only = load_facts(conn, plant_id, today, [eq.id])[0]
+        assert all(b.source == "APP" for b in app_only.breakdowns)  # no cut-over: permits not used
+
+        conn.execute(text("insert into settings (plant_id, key, value, created_at, updated_at) values (:p, 'failure_history_until', :v, now(), now())"),
+                     {"p": plant_id, "v": f'"{(today - timedelta(days=10)).isoformat()}"'})
+        settings = plant_settings(conn, plant_id)
+        assert settings.failure_history_until == today - timedelta(days=10)
+
+        facts = load_facts(conn, plant_id, today, [eq.id])[0]
+        permits = [b for b in facts.breakdowns if b.source == "PERMIT"]
+        assert [b.object_part for b in permits] == ["BELT", "BELT"]  # PM, not-issued and after-cut-over permits left out
+        assert permits[0].downtime_h == pytest.approx(6.0)
+        assert permits[1].is_repeat and not permits[0].is_repeat  # same part within the repeat window
+        assert permits[1].days_since_pm == pytest.approx(10 - 8 / 24, abs=0.01)  # PM permit closed 9.7 days before
+        assert all(b.failure_at.date() >= today - timedelta(days=10) for b in facts.breakdowns if b.source == "APP")
+        assert facts.last_pm is not None
+
+        modes = failure_days_by_type_mode(conn, plant_id)
+        assert len(next(v for (t, m), v in modes.items() if t == eq.equipment_type_id and m == "BELT/*")[0]) >= 2
+
+        conn.execute(text("delete from eclipse_permits where permit_no like 'T-%'"))
+        conn.execute(text("delete from settings where plant_id = :p and key = 'failure_history_until'"), {"p": plant_id})
+

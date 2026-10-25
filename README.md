@@ -1,6 +1,6 @@
 # CHP Analytics Sidecar (Python)
 
-Internal FastAPI service for the CHP Maintenance Planner. It does the heavy analytics the Laravel app (`../web`) does not do: equipment **health score**, **PM recommendations**, **Weibull** analysis, and later **ML failure prediction**.
+Internal FastAPI service of PlantPulse. It does the heavy analytics the Laravel app ([PlantPulse-web](https://github.com/ydesignshq/PlantPulse-web), cloned as `../web`) does not do: equipment **health score**, **PM recommendations**, **Weibull** analysis, and later **ML failure prediction**.
 
 > Status: health score v1, recommendations and Weibull (median-rank regression) are live. ML prediction waits for 6+ months of real data.
 
@@ -12,7 +12,7 @@ Internal FastAPI service for the CHP Maintenance Planner. It does the heavy anal
 - It is **not exposed to the internet**: it listens on 127.0.0.1 only, with a bearer token (`ANALYTICS_TOKEN`) shared with Laravel.
 - Laravel's scheduler triggers runs (nightly 02:00 IST and after imports/approvals). If this service is down, the app keeps working; only health scores go stale.
 
-See `../TECHNICAL_DESIGN.md` §3.1 and §6.
+See `TECHNICAL_DESIGN.md` §3.1 and §6 in [PlantPulse-core](https://github.com/ydesignshq/PlantPulse-core).
 
 ## Local setup
 
@@ -38,7 +38,9 @@ curl http://localhost:8100/health   # {"status":"ok","db":"ok"}
 
 ## How the score works
 
-Seven factors (weights editable in *Plant settings*): breakdowns (90 d), downtime vs type median, repeat failures, SAP PM overdue, running hours since PM, open defects by severity, condition readings vs alarm. `risk = Σ weight × factor (0–1)`, scaled by criticality (A 1.0, B 0.8, C 0.6); `score = 100 − risk`; bands Good ≥ 80, Watch ≥ 60, Poor ≥ 40, Critical < 40. Recommendations: PM at next opportunity, inspect, increase / decrease PM frequency, add to AOH/COH, raise RCA — each with its reason. Rules and choices: `../DECISIONS.md` (D-38 …).
+Seven factors (weights editable in *Plant settings*): breakdowns (90 d), downtime vs type median, repeat failures, SAP PM overdue, running hours since PM, open defects by severity, condition readings vs alarm. `risk = Σ weight × factor (0–1)`, scaled by criticality (A 1.0, B 0.8, C 0.6); `score = 100 − risk`; bands Good ≥ 80, Watch ≥ 60, Poor ≥ 40, Critical < 40. Recommendations: PM at next opportunity, inspect, increase / decrease PM frequency, add to AOH/COH, raise RCA — each with its reason. Rules and choices: `DECISIONS.md` in PlantPulse-core (D-38 …).
+
+**Failure sources.** Failures are the app's breakdown log. If the plant sets a cut-over date (*Plant settings → Permits are the failure history before*), corrective / breakdown Eclipse permits before that date are failures too (source `PERMIT`, failure mode `PART/*`), and breakdowns count only from that date on — JPL has no other history before SAP (D-74, D-75).
 
 ## Tests and lint
 
